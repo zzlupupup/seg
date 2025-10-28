@@ -1,0 +1,5 @@
+.vscode
+data
+model
+__pycache__
+final_model
