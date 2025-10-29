@@ -44,7 +44,8 @@ class CrossAtten(nn.Module):
         V = context
 
         MHA, _ = self.MHA(Q_norm, K_norm, V, need_weights=False, key_padding_mask=k_uncertainty_mask)
-        tokens = MHA + self.ffn(self.ff_norm(MHA))
+        MHA_res = MHA + Q_emded
+        tokens = MHA_res + self.ffn(self.ff_norm(MHA_res))
         
         B, N, C = tokens.shape
         patch_dim = round(N ** (1/3)) 
@@ -115,6 +116,7 @@ class Fusion(nn.Module):
 
             uncertain_l_mask = (uncertain_l_seq > threshold)
             uncertain_r_mask = (uncertain_r_seq > threshold)
+
 
         cross_atten_l = self.cross_atten(embed_l, embed_r, uncertain_r_mask)
         cross_atten_r = self.cross_atten(embed_r, embed_l, uncertain_l_mask)

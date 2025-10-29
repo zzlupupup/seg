@@ -23,11 +23,11 @@ from utils.test_3d_patch import test_all_case_Lung_HN
 from utils.data_util import get_transform
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root_path', type=str, default='../data/LUNG', help='Name of Experiment')
-parser.add_argument('--exp', type=str,  default='HN_Fusion', help='model_name')
+parser.add_argument('--root_path', type=str, default='data/LUNG', help='Name of Experiment')
+parser.add_argument('--exp', type=str,  default='HN_Fusion_un', help='model_name')
 parser.add_argument('--max_iterations', type=int,  default=6000, help='maximum epoch number to train')
-parser.add_argument('--batch_size', type=int, default=4, help='batch_size per gpu')
-parser.add_argument('--labeled_bs', type=int, default=2, help='labeled_batch_size per gpu')
+parser.add_argument('--batch_size', type=int, default=2, help='batch_size per gpu')
+parser.add_argument('--labeled_bs', type=int, default=1, help='labeled_batch_size per gpu')
 parser.add_argument('--lr', type=float,  default=0.0001, help='lr')
 parser.add_argument('--deterministic', type=int,  default=1, help='whether use deterministic training')
 parser.add_argument('--seed', type=int,  default=1337, help='random seed')
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     unlabeled_idxs = list(range(11, 54))
     batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size, batch_size-labeled_bs)
 
-    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=14, pin_memory=True,worker_init_fn=worker_init_fn)
+    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=1, pin_memory=True,worker_init_fn=worker_init_fn)
 
     net = HN().cuda()
     net.train()
@@ -119,7 +119,7 @@ if __name__ == "__main__":
             volume_batch, label_batch = volume_batch.cuda(), label_batch.cuda()
 
             #threshold
-            threshold = (0.5 + 0.5 * ramps.sigmoid_rampup(iter_num, max_iterations))
+            threshold = (0.55 + 0.45 * ramps.linear_rampup(iter_num, max_iterations))
 
             #sup_loss
             pred_fusion, pred_l, pred_r = net(volume_batch, threshold)
