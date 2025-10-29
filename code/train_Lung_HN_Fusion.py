@@ -37,6 +37,7 @@ parser.add_argument('--unsup_weight', type=float,  default=1.0, help='unsup_weig
 parser.add_argument('--unsup_rampup', type=float,  default=40.0, help='unsup_rampup')
 args = parser.parse_args()
 
+
 train_data_path = args.root_path
 snapshot_path = "./model/" + args.exp + "/"
 fig_path = Path(snapshot_path) / 'figures'

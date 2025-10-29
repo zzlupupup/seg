@@ -96,6 +96,9 @@ if __name__ == "__main__":
 
     net = HN().cuda()
     net.train()
+
+    net.load_state_dict(torch.load(snapshot_path /'' ))
+    iter_num = 2000
     optimizer = optim.AdamW(net.parameters(), lr=lr, weight_decay=0.00001)
 
     writer = SummaryWriter(snapshot_path+'/log')
@@ -183,7 +186,7 @@ if __name__ == "__main__":
 
                 current_metric_sum = cls1_avg_metric[0] + cls2_avg_metric[0]
 
-                if current_metric_sum >= best_metric_sum:
+                if current_metric_sum >= best_metric_sum and cls2_avg_metric[0] >= cls2_best:
                     
                     best_metric_sum = current_metric_sum
                     cls1_best = cls1_avg_metric[0]
