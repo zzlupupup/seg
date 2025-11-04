@@ -16,18 +16,19 @@ from tqdm import tqdm
 from pathlib import Path
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-from networks.hn_un import HN
+from networks.hn_un_cutmix import HN
 from utils import ramps, losses
 from dataloaders.lung import Lung, TwoStreamBatchSampler
 from utils.test_3d_patch import test_all_case_Lung_HN
 from utils.data_util import get_transform
+from utils.cutmix_util import context_mask
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root_path', type=str, default='data/LUNG', help='Name of Experiment')
-parser.add_argument('--exp', type=str,  default='HN_Fusion_un', help='model_name')
+parser.add_argument('--exp', type=str,  default='HN_Fusion_un_cutmix', help='model_name')
 parser.add_argument('--max_iterations', type=int,  default=6000, help='maximum epoch number to train')
-parser.add_argument('--batch_size', type=int, default=2, help='batch_size per gpu')
-parser.add_argument('--labeled_bs', type=int, default=1, help='labeled_batch_size per gpu')
+parser.add_argument('--batch_size', type=int, default=4, help='batch_size per gpu')
+parser.add_argument('--labeled_bs', type=int, default=2, help='labeled_batch_size per gpu')
 parser.add_argument('--lr', type=float,  default=0.0001, help='lr')
 parser.add_argument('--deterministic', type=int,  default=1, help='whether use deterministic training')
 parser.add_argument('--seed', type=int,  default=1337, help='random seed')
@@ -92,11 +93,10 @@ if __name__ == "__main__":
     unlabeled_idxs = list(range(11, 54))
     batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size, batch_size-labeled_bs)
 
-    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=1, pin_memory=True,worker_init_fn=worker_init_fn)
+    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=20, pin_memory=True,worker_init_fn=worker_init_fn)
 
     net = HN().cuda()
     net.train()
-
     optimizer = optim.AdamW(net.parameters(), lr=lr, weight_decay=0.00001)
 
     writer = SummaryWriter(snapshot_path+'/log')
@@ -119,11 +119,16 @@ if __name__ == "__main__":
             volume_batch, label_batch = sampled_batch['image'], sampled_batch['label']
             volume_batch, label_batch = volume_batch.cuda(), label_batch.cuda()
 
+            mask = context_mask(volume_batch[:labeled_bs], 0.65)
+            volume_batch_mix = torch.zeros_like(volume_batch)
+            volume_batch_mix[:labeled_bs] = mask * volume_batch[:labeled_bs] + (1 - mask) * volume_batch[labeled_bs:]
+            volume_batch_mix[labeled_bs:] = mask * volume_batch[labeled_bs:] + (1 - mask) * volume_batch[:labeled_bs]
+
             #threshold
             threshold = (0.55 + 0.45 * ramps.linear_rampup(iter_num, max_iterations))
 
             #sup_loss
-            pred_fusion, pred_l, pred_r = net(volume_batch, threshold)
+            pred_fusion, pred_l, pred_r = net(volume_batch_mix, threshold, mask)
             sup_loss_fusion = losses.ce_dice_loss(pred_fusion[:labeled_bs], label_batch[:labeled_bs], ce_weights)
             sup_loss_l = losses.ce_dice_loss(pred_l[:labeled_bs], label_batch[:labeled_bs], ce_weights)
             sup_loss_r = losses.ce_dice_loss(pred_r[:labeled_bs], label_batch[:labeled_bs], ce_weights)
@@ -201,13 +206,12 @@ if __name__ == "__main__":
                 logging.info(f'cls1_avg_metric: dice={cls1_avg_metric[0]:.4f},  cls2_avg_metric: dice={cls2_avg_metric[0]:.4f}')
                 logging.info(f'cls1_best={cls1_best:.4f},  cls2_best={cls2_best:.4f}')
 
-                net.train()
-                logging.info("end validation")
-
-            if iter_num % 1000 == 0:
                 save_mode_path = os.path.join(snapshot_path, 'iter_' + str(iter_num) + '.pth')
                 torch.save(net.state_dict(), save_mode_path)
                 logging.info("save model ")
+
+                net.train()
+                logging.info("end validation")
 
             if iter_num >= max_iterations:
                 break
