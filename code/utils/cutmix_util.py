@@ -1,6 +1,15 @@
 import torch
 import numpy as np
 
+def pred_mask_back(pred, mask, labeled_bs):
+    
+    label = mask * pred[:labeled_bs] + (1 - mask) * pred[labeled_bs:]
+    unlabel = mask * pred[labeled_bs:] + (1 - mask) * pred[:labeled_bs]
+    pred_back = torch.cat((label, unlabel), dim=0)
+
+    return pred_back
+
+
 def context_mask(img, mask_ratio):
     
     mask = []
