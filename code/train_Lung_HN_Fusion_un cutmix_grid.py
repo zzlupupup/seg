@@ -21,13 +21,14 @@ from utils import ramps, losses
 from dataloaders.lung import Lung, TwoStreamBatchSampler
 from utils.test_3d_patch import test_all_case_Lung_HN
 from utils.data_util import get_transform
+from utils.cutmix_util import grid_mask, pred_mask_back
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root_path', type=str, default='../data/LUNG', help='Name of Experiment')
-parser.add_argument('--exp', type=str,  default='HN_Fusion_un', help='model_name')
-parser.add_argument('--max_iterations', type=int,  default=6000, help='maximum epoch number to train')
-parser.add_argument('--batch_size', type=int, default=4, help='batch_size per gpu')
-parser.add_argument('--labeled_bs', type=int, default=2, help='labeled_batch_size per gpu')
+parser.add_argument('--root_path', type=str, default='data/LUNG', help='Name of Experiment')
+parser.add_argument('--exp', type=str,  default='HN_Fusion_un_cutmix', help='model_name')
+parser.add_argument('--max_iterations', type=int,  default=10000, help='maximum epoch number to train')
+parser.add_argument('--batch_size', type=int, default=2, help='batch_size per gpu')
+parser.add_argument('--labeled_bs', type=int, default=1, help='labeled_batch_size per gpu')
 parser.add_argument('--lr', type=float,  default=0.0001, help='lr')
 parser.add_argument('--deterministic', type=int,  default=1, help='whether use deterministic training')
 parser.add_argument('--seed', type=int,  default=1337, help='random seed')
@@ -92,20 +93,17 @@ if __name__ == "__main__":
     unlabeled_idxs = list(range(11, 54))
     batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size, batch_size-labeled_bs)
 
-    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=20, pin_memory=True,worker_init_fn=worker_init_fn)
+    trainloader = DataLoader(db_train, batch_sampler=batch_sampler, num_workers=1, pin_memory=True,worker_init_fn=worker_init_fn)
 
     net = HN().cuda()
     net.train()
-
     optimizer = optim.AdamW(net.parameters(), lr=lr, weight_decay=0.00001)
-    
+
     writer = SummaryWriter(snapshot_path+'/log')
     logging.info("{} itertations per epoch".format(len(trainloader)))
 
     iter_num = 0
     max_epoch = max_iterations//len(trainloader)+1
-    
-    net.load_state_dict(torch.load())
 
     avg_x = []
     avg_cls1 = []
@@ -114,18 +112,30 @@ if __name__ == "__main__":
     best_metric_sum = 0.0
     cls1_best = 0.0
     cls2_best = 0.0
-    
+
     ce_weights = torch.tensor([0.2, 1, 2], dtype=torch.float32).cuda()
     for epoch_num in tqdm(range(max_epoch), ncols=70):
         for i_batch, sampled_batch in enumerate(trainloader):
             volume_batch, label_batch = sampled_batch['image'], sampled_batch['label']
             volume_batch, label_batch = volume_batch.cuda(), label_batch.cuda()
 
+            mask = grid_mask(volume_batch[:labeled_bs])
+            volume_batch_mix = torch.zeros_like(volume_batch)
+            volume_batch_mix[:labeled_bs] = mask * volume_batch[:labeled_bs] + (1 - mask) * volume_batch[labeled_bs:]
+            volume_batch_mix[labeled_bs:] = mask * volume_batch[labeled_bs:] + (1 - mask) * volume_batch[:labeled_bs]
+            
             #threshold
             threshold = (0.55 + 0.45 * ramps.linear_rampup(iter_num, max_iterations))
 
             #sup_loss
-            pred_fusion, pred_l, pred_r = net(volume_batch, threshold)
+            pred_fusion_, pred_l_, pred_r_ = net(volume_batch_mix, threshold)
+            
+            #pred mask back
+
+            pred_fusion = pred_mask_back(pred_fusion_, mask, labeled_bs)
+            pred_l = pred_mask_back(pred_l_, mask, labeled_bs)
+            pred_r = pred_mask_back(pred_r_, mask, labeled_bs)
+
             sup_loss_fusion = losses.ce_dice_loss(pred_fusion[:labeled_bs], label_batch[:labeled_bs], ce_weights)
             sup_loss_l = losses.ce_dice_loss(pred_l[:labeled_bs], label_batch[:labeled_bs], ce_weights)
             sup_loss_r = losses.ce_dice_loss(pred_r[:labeled_bs], label_batch[:labeled_bs], ce_weights)
@@ -183,13 +193,9 @@ if __name__ == "__main__":
                 net.eval()
                 with torch.no_grad():
                     cls1_avg_metric, cls2_avg_metric = test_all_case_Lung_HN(net, test_image_list, metric_detail=1)
- 
-                save_mode_path = os.path.join(snapshot_path, 'iter_' + str(iter_num) + '.pth')
-                torch.save(net.state_dict(), save_mode_path)
-                logging.info("save model ") 
-                
+
                 current_metric_sum = cls1_avg_metric[0] + cls2_avg_metric[0]
-                
+
                 if current_metric_sum >= best_metric_sum and cls2_avg_metric[0] >= cls2_best:
                     
                     best_metric_sum = current_metric_sum
@@ -199,13 +205,17 @@ if __name__ == "__main__":
                     save_mode_path = os.path.join(snapshot_path, 'best_model.pth')
                     torch.save(net.state_dict(), save_mode_path)
                     logging.info("=============save best model===============")
-                
+
                 avg_x.append(iter_num)
                 avg_cls1.append(cls1_avg_metric[0])
                 avg_cls2.append(cls2_avg_metric[0])
 
                 logging.info(f'cls1_avg_metric: dice={cls1_avg_metric[0]:.4f},  cls2_avg_metric: dice={cls2_avg_metric[0]:.4f}')
                 logging.info(f'cls1_best={cls1_best:.4f},  cls2_best={cls2_best:.4f}')
+
+                save_mode_path = os.path.join(snapshot_path, 'iter_' + str(iter_num) + '.pth')
+                torch.save(net.state_dict(), save_mode_path)
+                logging.info("save model ")
 
                 net.train()
                 logging.info("end validation")

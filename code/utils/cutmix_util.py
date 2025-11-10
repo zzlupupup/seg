@@ -1,5 +1,8 @@
 import torch
 import numpy as np
+from torch.nn import functional as F
+
+
 
 def pred_mask_back(pred, mask, labeled_bs):
     
@@ -28,3 +31,13 @@ def context_mask(img, mask_ratio):
 
     return torch.stack(mask).unsqueeze(1)
 
+
+def grid_mask(img):
+
+    batch_size, channel, img_x, img_y, img_z = img.shape[0],img.shape[1],img.shape[2],img.shape[3],img.shape[4]
+
+    x = torch.randint(high=2, size=(batch_size, 1, img_x // 16, img_y // 16, img_z // 16)).float().cuda()
+    mask = F.interpolate(x, scale_factor=16, mode='nearest')
+
+    return mask
+    

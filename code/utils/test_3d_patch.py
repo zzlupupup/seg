@@ -9,7 +9,6 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from skimage.measure import label
-from networks.vnet import VNet
 from monai.transforms import LoadImaged, Compose, Orientationd, ScaleIntensityRanged, ToTensord, CropForegroundd
 
 def getLargestCC(segmentation):
