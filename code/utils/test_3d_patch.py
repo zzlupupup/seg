@@ -226,7 +226,7 @@ def test_all_case_Lung(model, image_list, num_classes=3, patch_size=(64, 64, 64)
 
     return cls1_avg_metric, cls2_avg_metric
 
-def test_all_case_Lung_HN(model, image_list, num_classes=3, patch_size=(64, 64, 64), stride_xy=32, stride_z=32, save_result=False, test_save_path=None, preproc_fn=None, metric_detail=1, nms=0, metric_txt_save=0):
+def test_all_case_Lung_HN(model, image_list, num_classes=3, patch_size=(64, 64, 64), stride_xy=32, stride_z=32, save_result=False, test_save_path=None, preproc_fn=None, metric_detail=1, post=None, metric_txt_save=0):
     imagLoader = Compose([
         LoadImaged(keys=['image', 'label'], ensure_channel_first=True),
         Orientationd(keys=["image", "label"], axcodes="RAS", labels=(('L', 'R'), ('P', 'A'), ('I', 'S'))),
@@ -240,6 +240,7 @@ def test_all_case_Lung_HN(model, image_list, num_classes=3, patch_size=(64, 64, 
             ),
         ToTensord(keys=['image', 'label'], track_meta=False)
     ])
+
     ith = 0
     cls1_total_metric = 0.0
     cls2_total_metric = 0.0
@@ -260,8 +261,10 @@ def test_all_case_Lung_HN(model, image_list, num_classes=3, patch_size=(64, 64, 
         prediction, score_map = test_single_case_HN(model, image, stride_xy, stride_z, patch_size, num_classes=num_classes)
         infer_time_end = time.time()
 
-        if nms:
-            prediction = getLargestCC(prediction)
+        if post is not None:
+            prediction = torch.as_tensor(prediction).cuda().unsqueeze(0)
+            prediction = post(prediction)
+            prediction = torch.argmax(prediction, dim=0)
 
         metric_time_start = time.time()     
         results = calculate_metric_percase_multiclass(prediction, label, num_classes)

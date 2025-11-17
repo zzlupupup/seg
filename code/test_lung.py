@@ -1,5 +1,8 @@
 import argparse
 import torch
+import numpy as np
+
+from monai import transforms
 from pathlib import Path
 from networks.hn import HN
 from utils.test_3d_patch import test_all_case_Lung_HN
@@ -12,12 +15,36 @@ args = parser.parse_args()
 model_path = Path(f"./model/{args.exp}")
 test_image_list = [dir for dir in Path(args.root_path).iterdir() if dir.is_dir()]
 
-mdoel = HN().cuda()
-mdoel.load_state_dict(torch.load(model_path / 'best_model.pth'))
-mdoel.eval()
+model = HN().cuda()
+model.load_state_dict(torch.load(model_path / 'best_model.pth'))
+model.eval()
 
-with torch.no_grad():
-    cls1_avg_metric, cls2_avg_metric = test_all_case_Lung_HN(mdoel, test_image_list, stride_xy=16, stride_z=16 ,metric_detail=1, metric_txt_save=1)
+if __name__ == '__main__':
+    
+    r = 5
+    threshold = 4/3 * np.pi * r ** 3
+
+    cls1_trans = transforms.KeepLargestConnectedComponent()
+    cls2_trans = transforms.RemoveSmallObjects(min_size=threshold, independent_channels=True, by_measure=True, pixdim=[1.0, 1.0, 1.0])
+
+    def apply_trans(img):
+        back = img[0:1]
+        cls1 = img[1:2]
+        cls2 = img[2:]
+
+        transed_cls1 = cls1_trans(cls1)
+        transed_cls2 = cls2_trans(cls2)
+        
+        return torch.cat([back, transed_cls1, transed_cls2], dim=0)
+
+    trans = transforms.Lambda(apply_trans)
+
+    post_trans = transforms.Compose([
+        transforms.AsDiscrete(to_onehot=3),
+        trans
+    ])
+    with torch.no_grad():
+        cls1_avg_metric, cls2_avg_metric = test_all_case_Lung_HN(model, test_image_list, stride_xy=32, stride_z=32 ,metric_detail=1, metric_txt_save=1, post=post_trans)
 
 
 
